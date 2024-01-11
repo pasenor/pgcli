@@ -33,12 +33,17 @@ def adapter(data, headers, table_format=None, **kwargs):
             table_name = table[1]
     else:
         table_name = "DUAL"
+    column_formatters = kwargs.get("column_formatters", None) or [
+        escape_for_sql_statement for _ in headers
+    ]
     if table_format == "sql-insert":
         h = '", "'.join(headers)
         yield 'INSERT INTO "{}" ("{}") VALUES'.format(table_name, h)
         prefix = "  "
         for d in data:
-            values = ", ".join(escape_for_sql_statement(v) for i, v in enumerate(d))
+            values = ", ".join(
+                val_formatter(v) for val_formatter, v in zip(column_formatters, d)
+            )
             yield "{}({})".format(prefix, values)
             if prefix == "  ":
                 prefix = ", "
@@ -52,15 +57,12 @@ def adapter(data, headers, table_format=None, **kwargs):
             yield 'UPDATE "{}" SET'.format(table_name)
             prefix = "  "
             for i, v in enumerate(d[keys:], keys):
-                yield '{}"{}" = {}'.format(
-                    prefix, headers[i], escape_for_sql_statement(v)
-                )
+                yield '{}"{}" = {}'.format(prefix, headers[i], column_formatters[i](v))
                 if prefix == "  ":
                     prefix = ", "
             f = '"{}" = {}'
             where = (
-                f.format(headers[i], escape_for_sql_statement(d[i]))
-                for i in range(keys)
+                f.format(headers[i], column_formatters[i](d[i])) for i in range(keys)
             )
             yield "WHERE {};".format(" AND ".join(where))
 

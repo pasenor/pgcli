@@ -24,7 +24,7 @@ def test_escape_for_sql_statement_str():
     assert escaped_bytes == "'example str'"
 
 
-def test_output_sql_insert():
+def test_output_sql_insert_without_types():
     global formatter
     formatter = TabularOutputFormatter
     register_new_formatter(formatter)
@@ -58,6 +58,47 @@ def test_output_sql_insert():
     output_list = [l for l in output]
     expected = [
         'INSERT INTO "user" ("id", "name", "email", "phone", "description", "created_at", "updated_at") VALUES',
+        "  ('1', 'Jackson', 'jackson_test@gmail.com', '132454789', NULL, "
+        + "'2022-09-09 19:44:32.712343+08', '2022-09-09 19:44:32.712343+08')",
+        ";",
+    ]
+    assert expected == output_list
+
+
+def test_output_sql_insert_with_psycopg_types():
+    global formatter
+    formatter = TabularOutputFormatter
+    register_new_formatter(formatter)
+    data = [
+        [
+            1,
+            "Jackson",
+            "jackson_test@gmail.com",
+            "132454789",
+            None,
+            "2022-09-09 19:44:32.712343+08",
+            "2022-09-09 19:44:32.712343+08",
+        ]
+    ]
+    header = ["id", "name", "email", "phone", "description", "created_at", "updated_at"]
+    table_format = "sql-insert"
+    kwargs = {
+        "column_types": [int, str, str, str, str, str, str],
+        "sep_title": "RECORD {n}",
+        "sep_character": "-",
+        "sep_length": (1, 25),
+        "missing_value": "<null>",
+        "integer_format": "",
+        "float_format": "",
+        "disable_numparse": True,
+        "preserve_whitespace": True,
+        "max_field_width": 500,
+    }
+    formatter.query = 'SELECT * FROM "user";'
+    output = adapter(data, header, table_format=table_format, **kwargs)
+    output_list = [l for l in output]
+    expected = [
+        'INSERT INTO "mytable" ("string_column", "int_column", "float_column", "jsonb_array", "json_dict", "int_array", "string_array", ) VALUES',
         "  ('1', 'Jackson', 'jackson_test@gmail.com', '132454789', NULL, "
         + "'2022-09-09 19:44:32.712343+08', '2022-09-09 19:44:32.712343+08')",
         ";",

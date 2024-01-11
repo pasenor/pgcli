@@ -1,5 +1,8 @@
 from configobj import ConfigObj, ParseError
 from pgspecial.namedqueries import NamedQueries
+from psycopg.adapt import Transformer
+
+from .value_formatter import format_value_with_dumper
 from .config import skip_initial_comment
 
 import atexit
@@ -51,7 +54,7 @@ from . import auth
 from .pgcompleter import PGCompleter
 from .pgtoolbar import create_toolbar_tokens_func
 from .pgstyle import style_factory, style_factory_output
-from .pgexecute import PGExecute
+from .pgexecute import PGExecute, ProtocolSafeCursor
 from .completion_refresher import CompletionRefresher
 from .config import (
     get_casing_file,
@@ -74,7 +77,7 @@ from urllib.parse import urlparse
 
 from getpass import getuser
 
-from psycopg import OperationalError, InterfaceError
+from psycopg import OperationalError, InterfaceError, pq
 from psycopg.conninfo import make_conninfo, conninfo_to_dict
 
 from collections import namedtuple
@@ -1024,7 +1027,11 @@ class PGCli:
 
     def _limit_output(self, cur):
         limit = min(self.row_limit, cur.rowcount)
-        new_cur = itertools.islice(cur, limit)
+        if isinstance(cur, ProtocolSafeCursor):
+            new_cur = cur
+            new_cur.set_output_limit(limit)
+        else:
+            new_cur = itertools.islice(cur, limit)
         new_status = "SELECT " + str(limit)
         click.secho("The result was limited to %s rows" % limit, fg="red")
 
@@ -1665,10 +1672,13 @@ def format_output(title, cur, headers, status, settings, explain_mode=False):
         if max_width is not None:
             cur = list(cur)
         column_types = None
+        column_formatters = None
         if hasattr(cur, "description"):
             column_types = []
+            column_type_oids = []
             for d in cur.description:
                 col_type = cur.adapters.types.get(d.type_code)
+                column_type_oids.append(col_type.oid if col_type else None)
                 type_name = col_type.name if col_type else None
                 if type_name in ("numeric", "float4", "float8"):
                     column_types.append(float)
@@ -1676,8 +1686,26 @@ def format_output(title, cur, headers, status, settings, explain_mode=False):
                     column_types.append(int)
                 else:
                     column_types.append(str)
+            escape_for_sql = table_format.startswith("sql-")
+            if hasattr(cur, "connection"):
+                type_transformer = Transformer(cur.connection)
 
-        formatted = formatter.format_output(cur, headers, **output_kwargs)
+                column_formatters = [
+                    functools.partial(
+                        format_value_with_dumper,
+                        dumper=type_transformer.get_dumper_by_oid(oid, pq.Format.TEXT),
+                        escape_for_sql=escape_for_sql,
+                    )
+                    for oid in column_type_oids
+                ]
+
+        formatted = formatter.format_output(
+            cur,
+            headers,
+            column_types=column_types,
+            column_formatters=column_formatters,
+            **output_kwargs,
+        )
         if isinstance(formatted, str):
             formatted = iter(formatted.splitlines())
         first_line = next(formatted)
@@ -1694,6 +1722,7 @@ def format_output(title, cur, headers, status, settings, explain_mode=False):
                 headers,
                 format_name="vertical",
                 column_types=column_types,
+                column_formatters=column_formatters,
                 **output_kwargs,
             )
             if isinstance(formatted, str):

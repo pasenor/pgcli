@@ -8,6 +8,7 @@ import psycopg
 import psycopg.sql
 from psycopg.conninfo import make_conninfo
 import sqlparse
+import itertools
 
 from .packages.parseutils.meta import FunctionMetadata, ForeignKey
 
@@ -65,11 +66,14 @@ class ProtocolSafeCursor(psycopg.Cursor):
     def __init__(self, *args, **kwargs):
         self.protocol_error = False
         self.protocol_message = ""
+        self._output_limit = None
         super().__init__(*args, **kwargs)
 
     def __iter__(self):
         if self.protocol_error:
             raise StopIteration
+        if self._output_limit is not None:
+            return itertools.islice(super().__iter__(), self._output_limit)
         return super().__iter__()
 
     def fetchall(self):
@@ -81,6 +85,9 @@ class ProtocolSafeCursor(psycopg.Cursor):
         if self.protocol_error:
             return (self.protocol_message,)
         return super().fetchone()
+
+    def set_output_limit(self, limit):
+        self._output_limit = limit
 
     # def mogrify(self, query, params):
     #     args = [Literal(v).as_string(self.connection) for v in params]

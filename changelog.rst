@@ -9,6 +9,7 @@ Bug fixes:
 ----------
 
 * Fix display of "short host" in prompt (with `\h`) for IPv4 addresses ([issue 964](https://github.com/dbcli/pgcli/issues/964)).
+* Fix formatter for `sql-insert` and `sql-update` to handle most types of values
 
 
 ==================
